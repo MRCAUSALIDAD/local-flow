@@ -1,0 +1,6 @@
+# whisper.cpp uses std::filesystem, which requires a macOS 10.15+ deployment
+# target. Tauri's default (10.13) breaks the C++ build, so pin it here. The
+# CMAKE_ prefix is forwarded by whisper-rs-sys into its CMake invocation.
+[env]
+MACOSX_DEPLOYMENT_TARGET = "11.0"
+CMAKE_OSX_DEPLOYMENT_TARGET = "11.0"

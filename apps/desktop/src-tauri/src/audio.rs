@@ -1,0 +1,163 @@
+use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+use std::sync::{Arc, Mutex};
+use std::thread;
+use std::time::Duration;
+
+const TARGET_SR: u32 = 16_000;
+
+#[derive(Clone)]
+pub struct Recorder {
+    recording: Arc<AtomicBool>,
+    samples: Arc<Mutex<Vec<f32>>>,
+    source_sr: Arc<AtomicU32>,
+}
+
+impl Recorder {
+    pub fn new() -> Self {
+        Self {
+            recording: Arc::new(AtomicBool::new(false)),
+            samples: Arc::new(Mutex::new(Vec::new())),
+            source_sr: Arc::new(AtomicU32::new(TARGET_SR)),
+        }
+    }
+
+    pub fn is_recording(&self) -> bool {
+        self.recording.load(Ordering::SeqCst)
+    }
+
+    pub fn start(&self, device_name: Option<String>) {
+        if self.is_recording() {
+            return;
+        }
+        self.samples.lock().unwrap().clear();
+        self.recording.store(true, Ordering::SeqCst);
+
+        let recording = self.recording.clone();
+        let samples = self.samples.clone();
+        let source_sr = self.source_sr.clone();
+        thread::spawn(move || {
+            if let Err(e) = record_loop(&recording, &samples, &source_sr, device_name.as_deref()) {
+                eprintln!("[audio] record error: {e}");
+                recording.store(false, Ordering::SeqCst);
+            }
+        });
+    }
+
+    pub fn stop(&self) -> Vec<f32> {
+        self.recording.store(false, Ordering::SeqCst);
+        thread::sleep(Duration::from_millis(120));
+        let raw = std::mem::take(&mut *self.samples.lock().unwrap());
+        let sr = self.source_sr.load(Ordering::SeqCst).max(1);
+        resample_to_16k(&raw, sr)
+    }
+}
+
+pub fn list_input_devices() -> Vec<String> {
+    let host = cpal::default_host();
+    host.input_devices()
+        .map(|devs| devs.filter_map(|d| d.name().ok()).collect())
+        .unwrap_or_default()
+}
+
+fn pick_device(host: &cpal::Host, name: Option<&str>) -> Option<cpal::Device> {
+    if let Some(name) = name {
+        if let Ok(mut devs) = host.input_devices() {
+            if let Some(dev) = devs.find(|d| d.name().map(|n| n == name).unwrap_or(false)) {
+                return Some(dev);
+            }
+        }
+    }
+    host.default_input_device()
+}
+
+fn record_loop(
+    recording: &Arc<AtomicBool>,
+    samples: &Arc<Mutex<Vec<f32>>>,
+    source_sr: &Arc<AtomicU32>,
+    device_name: Option<&str>,
+) -> anyhow::Result<()> {
+    let host = cpal::default_host();
+    let device = pick_device(&host, device_name)
+        .ok_or_else(|| anyhow::anyhow!("no input device available"))?;
+    let supported = device.default_input_config()?;
+    let sample_format = supported.sample_format();
+    let sr = supported.sample_rate().0;
+    let channels = supported.channels() as usize;
+    source_sr.store(sr, Ordering::SeqCst);
+
+    let config: cpal::StreamConfig = supported.into();
+    let err_fn = |e| eprintln!("[audio] stream error: {e}");
+
+    let rec = recording.clone();
+    let buf = samples.clone();
+    let stream = match sample_format {
+        cpal::SampleFormat::F32 => device.build_input_stream(
+            &config,
+            move |data: &[f32], _: &_| push(&rec, &buf, data, channels, |s| s),
+            err_fn,
+            None,
+        )?,
+        cpal::SampleFormat::I16 => device.build_input_stream(
+            &config,
+            move |data: &[i16], _: &_| push(&rec, &buf, data, channels, |s| s as f32 / 32768.0),
+            err_fn,
+            None,
+        )?,
+        cpal::SampleFormat::U16 => device.build_input_stream(
+            &config,
+            move |data: &[u16], _: &_| {
+                push(&rec, &buf, data, channels, |s| (s as f32 - 32768.0) / 32768.0)
+            },
+            err_fn,
+            None,
+        )?,
+        other => return Err(anyhow::anyhow!("unsupported sample format: {other:?}")),
+    };
+
+    stream.play()?;
+    while recording.load(Ordering::SeqCst) {
+        thread::sleep(Duration::from_millis(40));
+    }
+    Ok(())
+}
+
+fn push<T: Copy>(
+    recording: &Arc<AtomicBool>,
+    buf: &Arc<Mutex<Vec<f32>>>,
+    data: &[T],
+    channels: usize,
+    conv: impl Fn(T) -> f32,
+) {
+    if !recording.load(Ordering::SeqCst) {
+        return;
+    }
+    let chans = channels.max(1);
+    let mut g = buf.lock().unwrap();
+    for frame in data.chunks(chans) {
+        let sum: f32 = frame.iter().map(|&s| conv(s)).sum();
+        g.push(sum / frame.len() as f32);
+    }
+}
+
+fn resample_to_16k(input: &[f32], sr: u32) -> Vec<f32> {
+    if input.is_empty() {
+        return Vec::new();
+    }
+    if sr == TARGET_SR {
+        return input.to_vec();
+    }
+    let ratio = TARGET_SR as f64 / sr as f64;
+    let out_len = (input.len() as f64 * ratio) as usize;
+    let last = input.len() - 1;
+    let mut out = Vec::with_capacity(out_len);
+    for i in 0..out_len {
+        let src = i as f64 / ratio;
+        let idx = src as usize;
+        let frac = src - idx as f64;
+        let a = input[idx.min(last)] as f64;
+        let b = input[(idx + 1).min(last)] as f64;
+        out.push((a * (1.0 - frac) + b * frac) as f32);
+    }
+    out
+}

@@ -1,0 +1,65 @@
+# ---- OS ----
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+desktop.ini
+
+# ---- Cloud sync / local tooling ----
+.cloud/
+*.cloud
+*.icloud
+.dropbox
+.dropbox.attr
+.sync/
+.claude/
+
+# ---- Rust / Cargo ----
+target/
+**/target/
+*.rs.bk
+*.pdb
+
+# ---- Tauri (generated) ----
+apps/desktop/src-tauri/gen/
+apps/desktop/src-tauri/target/
+
+# ---- Node / frontend ----
+node_modules/
+dist/
+dist-ssr/
+*.local
+
+# ---- Logs ----
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# ---- Environment / secrets ----
+.env
+.env.*
+!.env.example
+
+# ---- Model weights (large, downloaded at runtime) ----
+models/*
+!models/.gitkeep
+*.bin
+*.gguf
+*.ggml
+
+# ---- Editors / IDE ----
+.vscode/*
+!.vscode/extensions.json
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
