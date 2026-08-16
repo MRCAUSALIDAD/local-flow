@@ -19,7 +19,49 @@ directamente en la app donde estés (y se copia al portapapeles).
 
 ---
 
-## 1. Requisitos previos
+## ⬇️ Instalación
+
+No hace falta compilar nada ni instalar Rust: descarga el instalador ya hecho.
+
+### Instalador de una línea
+
+**macOS y Linux**
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/MRCAUSALIDAD/local-flow/main/scripts/install.sh | bash
+```
+
+**Windows** (PowerShell)
+
+```powershell
+irm https://raw.githubusercontent.com/MRCAUSALIDAD/local-flow/main/scripts/install.ps1 | iex
+```
+
+El script detecta tu sistema y arquitectura, descarga el instalador de la
+última release y lo instala (en macOS además quita la cuarentena de Gatekeeper).
+
+### Descarga manual
+
+Desde [**Releases**](https://github.com/MRCAUSALIDAD/local-flow/releases/latest):
+
+| Sistema | Archivo | Cómo se instala |
+| --- | --- | --- |
+| macOS (Apple Silicon) | `..._aarch64.dmg` | Abrir y arrastrar a *Aplicaciones* |
+| macOS (Intel) | `..._x64.dmg` | Abrir y arrastrar a *Aplicaciones* |
+| Windows | `..._x64-setup.exe` | Ejecutar el instalador |
+| Debian/Ubuntu | `..._amd64.deb` | `sudo apt install ./<archivo>.deb` |
+| Otras distros | `..._amd64.AppImage` | `chmod +x` y ejecutar |
+
+> Las builds **no están firmadas** (no hay certificado de desarrollador).
+> En macOS: clic derecho → **Abrir**, o
+> `xattr -dr com.apple.quarantine "/Applications/Local Flow.app"`.
+> En Windows: SmartScreen → **Más información → Ejecutar de todos modos**.
+
+Tras instalar, sigue con el [paso 3: descargar el modelo de voz](#3-descargar-el-modelo-de-voz).
+
+---
+
+## 1. Requisitos previos (solo para compilar desde el código)
 
 Necesitas tres cosas base en cualquier sistema:
 
@@ -173,3 +215,24 @@ UI (React)  ──invoke/eventos──►  Backend (Rust)
 ```
 
 Licencias de terceros: ver [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md).
+
+---
+
+## Publicar una versión (mantenedores)
+
+`.github/workflows/release.yml` compila en GitHub Actions para macOS
+(Apple Silicon + Intel), Linux y Windows, y sube los instaladores a la release.
+
+```sh
+# 1. Sube la versión en los dos sitios (deben coincidir)
+#    apps/desktop/src-tauri/tauri.conf.json  ->  "version"
+#    apps/desktop/package.json               ->  "version"
+
+# 2. Etiqueta y empuja
+git tag v0.1.0
+git push origin v0.1.0
+```
+
+También se puede lanzar a mano desde *Actions → Release → Run workflow*
+indicando el tag. No hace falta ningún secreto: usa el `GITHUB_TOKEN`
+automático.

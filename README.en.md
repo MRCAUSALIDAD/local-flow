@@ -19,7 +19,50 @@ whatever app you're in (and copied to the clipboard).
 
 ---
 
-## 1. Prerequisites
+## ⬇️ Install
+
+No build toolchain, no Rust: just download a prebuilt installer.
+
+### One-line installer
+
+**macOS and Linux**
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/MRCAUSALIDAD/local-flow/main/scripts/install.sh | bash
+```
+
+**Windows** (PowerShell)
+
+```powershell
+irm https://raw.githubusercontent.com/MRCAUSALIDAD/local-flow/main/scripts/install.ps1 | iex
+```
+
+The script detects your OS and architecture, downloads the installer from the
+latest release and installs it (on macOS it also clears the Gatekeeper
+quarantine flag).
+
+### Manual download
+
+From [**Releases**](https://github.com/MRCAUSALIDAD/local-flow/releases/latest):
+
+| System | File | How to install |
+| --- | --- | --- |
+| macOS (Apple Silicon) | `..._aarch64.dmg` | Open, drag to *Applications* |
+| macOS (Intel) | `..._x64.dmg` | Open, drag to *Applications* |
+| Windows | `..._x64-setup.exe` | Run the installer |
+| Debian/Ubuntu | `..._amd64.deb` | `sudo apt install ./<file>.deb` |
+| Other distros | `..._amd64.AppImage` | `chmod +x` and run |
+
+> Builds are **unsigned** (no developer certificate).
+> macOS: right-click → **Open**, or
+> `xattr -dr com.apple.quarantine "/Applications/Local Flow.app"`.
+> Windows: SmartScreen → **More info → Run anyway**.
+
+After installing, continue with [step 3: download the voice model](#3-download-the-voice-model).
+
+---
+
+## 1. Prerequisites (only to build from source)
 
 You need three base things on any system:
 
@@ -173,3 +216,24 @@ UI (React)  ──invoke/events──►  Backend (Rust)
 ```
 
 Third-party licenses: see [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md).
+
+---
+
+## Cutting a release (maintainers)
+
+`.github/workflows/release.yml` builds on GitHub Actions for macOS
+(Apple Silicon + Intel), Linux and Windows, and uploads the installers to the
+release.
+
+```sh
+# 1. Bump the version in both places (they must match)
+#    apps/desktop/src-tauri/tauri.conf.json  ->  "version"
+#    apps/desktop/package.json               ->  "version"
+
+# 2. Tag and push
+git tag v0.1.0
+git push origin v0.1.0
+```
+
+It can also be run manually from *Actions → Release → Run workflow* with the
+tag as input. No secrets required: it uses the automatic `GITHUB_TOKEN`.

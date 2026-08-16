@@ -1,0 +1,104 @@
+name: Release
+
+# Builds installers for macOS (Apple Silicon + Intel), Linux and Windows,
+# then publishes them to a GitHub Release so end users only have to download
+# one file. Triggered by pushing a `v*` tag, or manually.
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to build and publish (e.g. v0.1.0)"
+        required: true
+
+jobs:
+  build:
+    permissions:
+      contents: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: macos-14
+            rust_target: aarch64-apple-darwin
+            args: "--target aarch64-apple-darwin"
+          - platform: macos-13
+            rust_target: x86_64-apple-darwin
+            args: "--target x86_64-apple-darwin"
+          - platform: ubuntu-22.04
+            rust_target: x86_64-unknown-linux-gnu
+            args: "--bundles deb,appimage"
+          - platform: windows-latest
+            rust_target: x86_64-pc-windows-msvc
+            args: "--bundles nsis,msi"
+
+    runs-on: ${{ matrix.platform }}
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
+
+      # Tauri/WebKit, plus this app's own native deps:
+      # libasound2-dev -> microphone (cpal), libxdo-dev -> keystroke injection (enigo),
+      # cmake/build-essential -> whisper.cpp is compiled from source by whisper-rs.
+      - name: Install Linux dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential cmake curl wget file patchelf \
+            libasound2-dev libxdo-dev libssl-dev \
+            libwebkit2gtk-4.1-dev librsvg2-dev \
+            libgtk-3-dev libayatana-appindicator3-dev
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: apps/desktop/package-lock.json
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.rust_target }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: apps/desktop/src-tauri -> target
+          key: ${{ matrix.rust_target }}
+
+      - name: Install frontend dependencies
+        working-directory: apps/desktop
+        run: npm ci
+
+      - uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Ad-hoc signature. Not a Developer ID cert, so Gatekeeper still warns,
+          # but it keeps macOS from rejecting the bundle outright on Apple Silicon.
+          APPLE_SIGNING_IDENTITY: "-"
+        with:
+          projectPath: apps/desktop
+          tagName: ${{ github.event.inputs.tag || github.ref_name }}
+          releaseName: "Local Flow __VERSION__"
+          releaseBody: |
+            ## Install
+
+            **macOS** — download the `.dmg` for your chip (`aarch64` = Apple Silicon, `x64` = Intel), open it, drag **Local Flow** to Applications.
+            First launch: right click the app → **Open**. If macOS says the app is damaged, run:
+            `xattr -dr com.apple.quarantine "/Applications/Local Flow.app"`
+
+            **Windows** — download `...-setup.exe` and run it. SmartScreen: *More info → Run anyway*.
+
+            **Linux** — `.deb` for Debian/Ubuntu (`sudo dpkg -i <file>.deb`), or the `.AppImage` (`chmod +x` then run).
+
+            Or use the one-line installer, see the [README](https://github.com/${{ github.repository }}#readme).
+
+            After installing, open **Settings → Voice model** and download a model once. Everything runs offline from there.
+          releaseDraft: false
+          prerelease: false
+          includeUpdaterJson: false
+          args: ${{ matrix.args }}
