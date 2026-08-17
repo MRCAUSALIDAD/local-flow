@@ -53,17 +53,25 @@ impl Recorder {
     }
 }
 
+/// cpal 0.18 replaced `Device::name()` with the richer `description()`.
+fn device_name(device: &cpal::Device) -> Option<String> {
+    device
+        .description()
+        .ok()
+        .map(|desc| desc.name().to_string())
+}
+
 pub fn list_input_devices() -> Vec<String> {
     let host = cpal::default_host();
     host.input_devices()
-        .map(|devs| devs.filter_map(|d| d.name().ok()).collect())
+        .map(|devs| devs.filter_map(|d| device_name(&d)).collect())
         .unwrap_or_default()
 }
 
 fn pick_device(host: &cpal::Host, name: Option<&str>) -> Option<cpal::Device> {
     if let Some(name) = name {
         if let Ok(mut devs) = host.input_devices() {
-            if let Some(dev) = devs.find(|d| d.name().map(|n| n == name).unwrap_or(false)) {
+            if let Some(dev) = devs.find(|d| device_name(d).as_deref() == Some(name)) {
                 return Some(dev);
             }
         }
@@ -82,7 +90,8 @@ fn record_loop(
         .ok_or_else(|| anyhow::anyhow!("no input device available"))?;
     let supported = device.default_input_config()?;
     let sample_format = supported.sample_format();
-    let sr = supported.sample_rate().0;
+    // cpal 0.18 aliases SampleRate to u32, so it is no longer a newtype.
+    let sr = supported.sample_rate();
     let channels = supported.channels() as usize;
     source_sr.store(sr, Ordering::SeqCst);
 
@@ -93,19 +102,19 @@ fn record_loop(
     let buf = samples.clone();
     let stream = match sample_format {
         cpal::SampleFormat::F32 => device.build_input_stream(
-            &config,
+            config,
             move |data: &[f32], _: &_| push(&rec, &buf, data, channels, |s| s),
             err_fn,
             None,
         )?,
         cpal::SampleFormat::I16 => device.build_input_stream(
-            &config,
+            config,
             move |data: &[i16], _: &_| push(&rec, &buf, data, channels, |s| s as f32 / 32768.0),
             err_fn,
             None,
         )?,
         cpal::SampleFormat::U16 => device.build_input_stream(
-            &config,
+            config,
             move |data: &[u16], _: &_| {
                 push(&rec, &buf, data, channels, |s| (s as f32 - 32768.0) / 32768.0)
             },
