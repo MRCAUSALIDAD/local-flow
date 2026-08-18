@@ -347,6 +347,7 @@ impl TranscriptionWorker {
 
                 match transcribe(&utterance, prompt) {
                     Ok(text) if text.trim().is_empty() => {}
+                    Ok(text) if is_non_speech(&text) => {}
                     Ok(text) => {
                         carry = Some(tail_words(&text, 32));
                         emit(LiveSegment {
@@ -390,6 +391,45 @@ impl TranscriptionWorker {
 
 fn millis_since(base: Instant, at: Instant) -> u64 {
     at.saturating_duration_since(base).as_millis() as u64
+}
+
+/// Whether a transcription is one of Whisper's non-speech artefacts rather
+/// than actual words.
+///
+/// Fed near-silence, Whisper reliably invents sound annotations like
+/// "[Música]" or credits scraped from its subtitle training data. A live
+/// session hits this constantly: the microphone track is mostly quiet, and the
+/// far side pauses between sentences.
+fn is_non_speech(text: &str) -> bool {
+    let t = text.trim();
+    if t.is_empty() {
+        return true;
+    }
+
+    // Wholly enclosed in brackets or music notes: an annotation, not speech.
+    let enclosed = (t.starts_with('[') && t.ends_with(']'))
+        || (t.starts_with('(') && t.ends_with(')'))
+        || (t.starts_with('*') && t.ends_with('*'));
+    if enclosed && !t[1..t.len() - 1].contains(['[', '(']) {
+        return true;
+    }
+    if t.chars().all(|c| "♪♫*-. ".contains(c)) {
+        return true;
+    }
+
+    let lower = t.to_lowercase();
+    let lower = lower.trim_matches(|c: char| !c.is_alphanumeric());
+    const ARTEFACTS: [&str; 8] = [
+        "subtítulos realizados por la comunidad de amara.org",
+        "subtitulado por la comunidad de amara.org",
+        "más información en www.amara.org",
+        "thanks for watching",
+        "thank you for watching",
+        "gracias por ver el video",
+        "subscribe to my channel",
+        "www.amara.org",
+    ];
+    ARTEFACTS.iter().any(|a| lower == *a)
 }
 
 /// Last `n` words, used to prime a continuation without feeding Whisper a
@@ -525,6 +565,26 @@ mod tests {
             &[silence(16_000), tone(16_000, 0.02), silence(16_000)],
         );
         assert_eq!(out.len(), 1, "a quiet talker should not be missed");
+    }
+
+    #[test]
+    fn non_speech_annotations_are_rejected() {
+        assert!(is_non_speech("[Música]"));
+        assert!(is_non_speech("  (applause) "));
+        assert!(is_non_speech("[BLANK_AUDIO]"));
+        assert!(is_non_speech("♪♪♪"));
+        assert!(is_non_speech(""));
+        assert!(is_non_speech(
+            "Subtítulos realizados por la comunidad de Amara.org"
+        ));
+    }
+
+    #[test]
+    fn real_speech_survives_the_filter() {
+        assert!(!is_non_speech("Hola, soy la otra persona en la videollamada."));
+        assert!(!is_non_speech("Thanks for watching the demo, it worked."));
+        assert!(!is_non_speech("(laughs) but seriously, the deadline is Friday"));
+        assert!(!is_non_speech("El segundo fragmento."));
     }
 
     #[test]

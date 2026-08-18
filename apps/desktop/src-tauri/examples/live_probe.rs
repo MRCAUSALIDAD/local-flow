@@ -4,7 +4,7 @@
 //!
 //! Plays back nothing itself: start a video or a call first.
 
-use local_flow_lib::loopback::LoopbackRecorder;
+use local_flow_lib::loopback::{StreamCapture, Target};
 use local_flow_lib::stream::{Track, VadChunker, VadConfig};
 use local_flow_lib::whisper::{self, Options, Transcriber};
 use std::time::{Duration, Instant};
@@ -31,8 +31,8 @@ fn main() {
     let transcriber = Transcriber::new(model).expect("failed to load model");
     println!("model loaded in {:.1}s\n", t0.elapsed().as_secs_f64());
 
-    let recorder = LoopbackRecorder::new();
-    let rx = match recorder.start(None) {
+    let recorder = StreamCapture::new();
+    let rx = match recorder.start(Target::System(None)) {
         Ok(rx) => rx,
         Err(e) => {
             println!("FAILED to start capture: {e}");

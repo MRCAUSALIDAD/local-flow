@@ -46,6 +46,19 @@ pub struct LoopbackSource {
     pub is_default: bool,
 }
 
+/// What a capture stream should listen to.
+#[derive(Clone, Debug)]
+pub enum Target {
+    /// The computer's own output.
+    System(Option<String>),
+    /// A microphone, streamed continuously.
+    ///
+    /// The dictation recorder also reads a microphone, but it buffers a whole
+    /// press-and-hold and hands it over at the end. A live session needs the
+    /// same continuous, bounded delivery as the system stream.
+    Mic(Option<String>),
+}
+
 /// Whether this platform build can capture system audio at all.
 ///
 /// The only current restriction is the macOS version: Core Audio process taps
@@ -137,27 +150,41 @@ fn default_source(host: &cpal::Host) -> Option<cpal::Device> {
     }
 }
 
-fn pick_source(host: &cpal::Host, name: Option<&str>) -> Option<cpal::Device> {
-    if let Some(name) = name {
-        let mut all = host
-            .output_devices()
-            .ok()
-            .into_iter()
-            .flatten()
-            .chain(host.input_devices().ok().into_iter().flatten());
-        if let Some(dev) = all.find(|d| device_name(d).as_deref() == Some(name)) {
-            return Some(dev);
+fn pick_target(host: &cpal::Host, target: &Target) -> Option<cpal::Device> {
+    match target {
+        Target::System(name) => {
+            if let Some(name) = name {
+                let mut all = host
+                    .output_devices()
+                    .ok()
+                    .into_iter()
+                    .flatten()
+                    .chain(host.input_devices().ok().into_iter().flatten());
+                if let Some(dev) = all.find(|d| device_name(d).as_deref() == Some(name)) {
+                    return Some(dev);
+                }
+            }
+            default_source(host)
+        }
+        Target::Mic(name) => {
+            if let Some(name) = name {
+                if let Ok(mut devs) = host.input_devices() {
+                    if let Some(dev) = devs.find(|d| device_name(d).as_deref() == Some(name)) {
+                        return Some(dev);
+                    }
+                }
+            }
+            host.default_input_device()
         }
     }
-    default_source(host)
 }
 
-pub struct LoopbackRecorder {
+pub struct StreamCapture {
     running: Arc<AtomicBool>,
     dropped: Arc<AtomicU64>,
 }
 
-impl LoopbackRecorder {
+impl StreamCapture {
     pub fn new() -> Self {
         Self {
             running: Arc::new(AtomicBool::new(false)),
@@ -180,10 +207,12 @@ impl LoopbackRecorder {
     /// being logged from a worker thread: opening a loopback device is the step
     /// most likely to fail (missing permission, unsupported OS), and the user
     /// needs to be told immediately.
-    pub fn start(&self, source: Option<String>) -> Result<Receiver<AudioBlock>, String> {
-        availability()?;
+    pub fn start(&self, target: Target) -> Result<Receiver<AudioBlock>, String> {
+        if matches!(target, Target::System(_)) {
+            availability()?;
+        }
         if self.is_running() {
-            return Err("System audio capture is already running.".into());
+            return Err("This capture stream is already running.".into());
         }
 
         let (tx, rx) = sync_channel::<AudioBlock>(QUEUE_CAPACITY);
@@ -195,7 +224,7 @@ impl LoopbackRecorder {
         let running = self.running.clone();
         let dropped = self.dropped.clone();
         thread::spawn(move || {
-            let outcome = capture_loop(source.as_deref(), tx, &running, &dropped, &ready_tx);
+            let outcome = capture_loop(&target, tx, &running, &dropped, &ready_tx);
             if let Err(e) = outcome {
                 // Only reaches here for a failure after start-up was reported.
                 eprintln!("[loopback] {e}");
@@ -211,7 +240,7 @@ impl LoopbackRecorder {
             }
             Err(_) => {
                 self.running.store(false, Ordering::SeqCst);
-                Err("Timed out opening the system audio device.".into())
+                Err("Timed out opening the audio device.".into())
             }
         }
     }
@@ -222,7 +251,7 @@ impl LoopbackRecorder {
 }
 
 fn capture_loop(
-    source: Option<&str>,
+    target: &Target,
     tx: SyncSender<AudioBlock>,
     running: &Arc<AtomicBool>,
     dropped: &Arc<AtomicU64>,
@@ -231,8 +260,11 @@ fn capture_loop(
     let host = cpal::default_host();
 
     let build = || -> Result<(cpal::Device, cpal::SupportedStreamConfig), String> {
-        let device = pick_source(&host, source)
-            .ok_or_else(|| "No system audio source available.".to_string())?;
+        let device = pick_target(&host, target)
+            .ok_or_else(|| match target {
+                Target::System(_) => "No system audio source available.".to_string(),
+                Target::Mic(_) => "No microphone available.".to_string(),
+            })?;
         // A monitor source is a real input; a tapped output device is not, and
         // its stream follows the output format.
         let supported = if device.supports_input() {
@@ -268,7 +300,7 @@ fn capture_loop(
     };
 
     if let Err(e) = stream.play() {
-        let e = format!("Could not start the system audio stream: {e}");
+        let e = format!("Could not start the audio stream: {e}");
         let _ = ready.send(Err(e.clone()));
         return Err(e);
     }

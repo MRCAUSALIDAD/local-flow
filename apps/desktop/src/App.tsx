@@ -23,6 +23,10 @@ const DEFAULT_CONFIG: Config = {
   copy_to_clipboard: true,
   show_metrics: false,
   metrics_corner: "top-right",
+  loopback_source: null,
+  capture_mic: true,
+  vad_silence_ms: 600,
+  live_max_chunk_secs: 25,
 };
 
 function App() {

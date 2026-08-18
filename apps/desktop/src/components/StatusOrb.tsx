@@ -4,12 +4,14 @@ const LABELS: Record<FlowStatus, string> = {
   idle: "Ready",
   listening: "Listening…",
   transcribing: "Transcribing…",
+  "listening-system": "Listening to system audio…",
 };
 
 const HINTS: Record<FlowStatus, string> = {
   idle: "Hold ⌥ Space anywhere — it types into your active app",
   listening: "Release to transcribe",
   transcribing: "Running whisper locally",
+  "listening-system": "Transcribing what your computer is playing",
 };
 
 interface Props {

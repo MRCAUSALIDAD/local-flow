@@ -1,4 +1,36 @@
-export type FlowStatus = "idle" | "listening" | "transcribing";
+export type FlowStatus =
+  | "idle"
+  | "listening"
+  | "transcribing"
+  | "listening-system";
+
+/** Which stream a live segment came from. */
+export type Track = "system" | "mic";
+
+export interface LiveEntry {
+  id: number;
+  track: Track;
+  text: string;
+  start_ms: number;
+  end_ms: number;
+}
+
+export interface LiveState {
+  listening: boolean;
+  elapsed_ms: number;
+  backlog: number;
+  lagging: boolean;
+  dropped: number;
+  /** False until audio arrives; a silent system is normal, not a failure. */
+  receiving: boolean;
+}
+
+export interface LoopbackSource {
+  name: string;
+  is_default: boolean;
+}
+
+export type ExportFormat = "txt" | "md" | "srt";
 
 export interface Config {
   model_path: string | null;
@@ -8,6 +40,10 @@ export interface Config {
   copy_to_clipboard: boolean;
   show_metrics: boolean;
   metrics_corner: string;
+  loopback_source: string | null;
+  capture_mic: boolean;
+  vad_silence_ms: number;
+  live_max_chunk_secs: number;
 }
 
 export interface ModelInfo {

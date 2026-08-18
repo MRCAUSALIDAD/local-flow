@@ -21,8 +21,8 @@ fn main() {
     println!("\n--- capturing 5s of system audio ---");
     println!("(play something audible now)");
 
-    let recorder = LoopbackRecorder::new();
-    let rx = match recorder.start(None) {
+    let recorder = StreamCapture::new();
+    let rx = match recorder.start(Target::System(None)) {
         Ok(rx) => rx,
         Err(e) => {
             println!("  FAILED to start: {e}");
