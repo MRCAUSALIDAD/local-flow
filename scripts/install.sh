@@ -40,11 +40,16 @@ case "$http_code" in
   *) die "GitHub API returned HTTP $http_code." ;;
 esac
 
-# Pick the first asset download URL whose file name matches the given regex.
+# Pick the first asset download URL whose file name matches the given regex,
+# printing nothing when there is no match.
+#
+# The grep is guarded because `set -o pipefail` is on: without it, a pattern
+# that matches nothing fails the whole pipeline and kills the script before it
+# can fall back to another name or report a useful error.
 asset_url() {
   grep -o '"browser_download_url": *"[^"]*"' "$release_json" \
     | sed 's/.*": *"//; s/"$//' \
-    | grep -E "$1" \
+    | { grep -E "$1" || true; } \
     | head -n1
 }
 
@@ -59,13 +64,23 @@ arch="$(uname -m)"
 # ---------------------------------------------------------------------- macOS
 
 install_macos() {
+  # Releases ship one universal .dmg; older ones had a build per architecture,
+  # so fall back to those names.
   case "$arch" in
-    arm64 | aarch64) pattern='aarch64\.dmg$' ;;
-    x86_64) pattern='x64\.dmg$' ;;
+    arm64 | aarch64) patterns='universal\.dmg$ aarch64\.dmg$' ;;
+    x86_64) patterns='universal\.dmg$ x64\.dmg$' ;;
     *) die "Unsupported macOS architecture: $arch" ;;
   esac
 
-  url="$(asset_url "$pattern")"
+  url=""
+  for pattern in $patterns; do
+    url="$(asset_url "$pattern")"
+    # Not `[ -n "$url" ] && break`: under `set -e` a failed test as the last
+    # command in the loop body aborts the script.
+    if [ -n "$url" ]; then
+      break
+    fi
+  done
   [ -n "$url" ] || die "No .dmg found in the latest release for $arch."
 
   dmg="$TMPDIR_LF/local-flow.dmg"

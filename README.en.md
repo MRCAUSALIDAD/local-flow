@@ -47,8 +47,7 @@ From [**Releases**](https://github.com/MRCAUSALIDAD/local-flow/releases/latest):
 
 | System | File | How to install |
 | --- | --- | --- |
-| macOS (Apple Silicon) | `..._aarch64.dmg` | Open, drag to *Applications* |
-| macOS (Intel) | `..._x64.dmg` | Open, drag to *Applications* |
+| macOS (Apple Silicon and Intel) | `..._universal.dmg` | Open, drag to *Applications* |
 | Windows | `..._x64-setup.exe` | Run the installer |
 | Debian/Ubuntu | `..._amd64.deb` | `sudo apt install ./<file>.deb` |
 | Other distros | `..._amd64.AppImage` | `chmod +x` and run |
