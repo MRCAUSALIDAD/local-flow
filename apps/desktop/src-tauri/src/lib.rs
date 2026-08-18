@@ -1,5 +1,7 @@
 mod audio;
 mod config;
+pub mod dsp;
+pub mod loopback;
 mod models;
 mod whisper;
 

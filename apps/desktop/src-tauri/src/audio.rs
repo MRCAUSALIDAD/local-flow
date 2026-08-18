@@ -4,7 +4,7 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 
-const TARGET_SR: u32 = 16_000;
+use crate::dsp::{downmix_into, resample_to_16k, TARGET_SR};
 
 #[derive(Clone)]
 pub struct Recorder {
@@ -141,32 +141,6 @@ fn push<T: Copy>(
     if !recording.load(Ordering::SeqCst) {
         return;
     }
-    let chans = channels.max(1);
     let mut g = buf.lock().unwrap();
-    for frame in data.chunks(chans) {
-        let sum: f32 = frame.iter().map(|&s| conv(s)).sum();
-        g.push(sum / frame.len() as f32);
-    }
-}
-
-fn resample_to_16k(input: &[f32], sr: u32) -> Vec<f32> {
-    if input.is_empty() {
-        return Vec::new();
-    }
-    if sr == TARGET_SR {
-        return input.to_vec();
-    }
-    let ratio = TARGET_SR as f64 / sr as f64;
-    let out_len = (input.len() as f64 * ratio) as usize;
-    let last = input.len() - 1;
-    let mut out = Vec::with_capacity(out_len);
-    for i in 0..out_len {
-        let src = i as f64 / ratio;
-        let idx = src as usize;
-        let frac = src - idx as f64;
-        let a = input[idx.min(last)] as f64;
-        let b = input[(idx + 1).min(last)] as f64;
-        out.push((a * (1.0 - frac) + b * frac) as f32);
-    }
-    out
+    downmix_into(data, channels, conv, &mut g);
 }
