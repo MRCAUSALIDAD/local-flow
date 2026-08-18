@@ -150,12 +150,16 @@ A partir de aquí funciona **sin internet**.
 
 ### macOS
 
-Dos permisos, ambos gestionados en *Ajustes del Sistema → Privacidad y seguridad*:
+Tres permisos, gestionados en *Ajustes del Sistema → Privacidad y seguridad*:
 
 1. **Micrófono** — se pide al primer dictado. Acéptalo.
 2. **Accesibilidad** — necesario para que escriba en **otras** apps.
    - En la app aparece un aviso con botón para abrir el panel, o ve a
      *Privacidad y seguridad → Accesibilidad* y **activa Local Flow**.
+3. **Captura de audio del sistema** — necesaria para la pestaña *Listen*.
+   Es una categoría de permiso aparte de la del micrófono. En las pruebas
+   sobre macOS 26 la captura funcionó sin pedir nada; si tu sistema sí lo
+   pide, acéptalo.
 
 > **Importante (builds sin firmar):** cada vez que **recompilas** la app, macOS
 > puede invalidar el permiso de Accesibilidad aunque la casilla siga marcada.
@@ -194,7 +198,52 @@ Dos permisos, ambos gestionados en *Ajustes del Sistema → Privacidad y segurid
 
 ---
 
-## 6. Desinstalar
+## 6. Escuchar el audio del ordenador
+
+Además del dictado, Local Flow puede transcribir **lo que suena en tu equipo**:
+una videollamada, un vídeo de YouTube, un pódcast. Sigue siendo todo local.
+
+1. Abre la pestaña **Listen**.
+2. Deja **Audio source** en *Automatic* (o elige una salida concreta).
+3. Pulsa **Start listening** y reproduce lo que quieras transcribir.
+
+El texto aparece en vivo, etiquetado por interlocutor: **Them** (lo que suena
+en el equipo) y **Me** (tu micrófono, si lo dejas activado en *Settings*).
+Puedes copiar todo o exportar a `.md`; los archivos van a la carpeta de datos
+de la app, en `sessions/`.
+
+Mientras escuchas, el dictado con ⌥ Space queda **desactivado** a propósito:
+escribiría el texto dentro de la propia videollamada.
+
+### Detalles que conviene saber
+
+- **Abrir la captura puede tardar unos segundos.** macOS crea un dispositivo
+  de audio temporal para el sondeo, y va más lento si acabas de cerrar otra
+  sesión. El botón muestra *Starting…* mientras tanto.
+- **"Waiting for audio" no es un error.** La captura no entrega nada hasta que
+  algo suena.
+- **Auriculares recomendados** si activas la pista de micrófono. Con altavoces,
+  tu micro capta también lo que suena y el texto saldría duplicado. La app
+  descarta automáticamente el eco evidente (*Suppress microphone echo*), pero
+  unos auriculares lo resuelven de raíz.
+- **Si el texto sale pobre**, prueba el modelo **Small** en *Settings*. La
+  transcripción va muy por debajo de tiempo real, así que hay margen de sobra.
+
+### Requisitos por sistema
+
+| Sistema | Requisito |
+| --- | --- |
+| **macOS** | 14.6 o superior. En versiones anteriores la pestaña aparece deshabilitada y el dictado sigue funcionando con normalidad. |
+| **Windows** | Ninguno. |
+| **Linux** | PulseAudio o PipeWire (con `pipewire-pulse`). Un sistema con ALSA a secas no expone el audio de salida. |
+
+> **Aviso legal:** grabar o transcribir una conversación puede requerir el
+> consentimiento de los participantes según dónde estés. Es tu
+> responsabilidad.
+
+---
+
+## 7. Desinstalar
 
 - **macOS:** borra `/Applications/Local Flow.app` y
   `~/Library/Application Support/com.gabriel.local-flow` (modelos y config).
@@ -208,6 +257,11 @@ Dos permisos, ambos gestionados en *Ajustes del Sistema → Privacidad y segurid
 ```
 UI (React)  ──invoke/eventos──►  Backend (Rust)
                                   ├── audio.rs    captura cpal + resample→16kHz
+                                  ├── loopback.rs captura del audio del sistema
+                                  ├── stream.rs   troceado VAD + cola en vivo
+                                  ├── live.rs     sesión de dos pistas
+                                  ├── session.rs  transcript y exportación
+                                  ├── dsp.rs      remuestreo y anti-aliasing
                                   ├── whisper.rs  transcripción whisper.cpp (IA local)
                                   ├── models.rs   descarga/gestión de modelos
                                   ├── config.rs   ajustes en JSON

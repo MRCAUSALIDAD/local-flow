@@ -30,6 +30,12 @@ pub struct Config {
     /// Hard cap on an utterance, keeping it inside Whisper's 30 s window.
     #[serde(default = "default_max_chunk")]
     pub live_max_chunk_secs: u64,
+    /// Discard microphone speech that is really the speakers bleeding in.
+    ///
+    /// Off is right when wearing headphones and talking over the audio, since
+    /// then nothing bleeds and the check can only cost real speech.
+    #[serde(default = "default_true")]
+    pub suppress_mic_echo: bool,
 }
 
 fn default_vad_silence() -> u64 {
@@ -62,6 +68,7 @@ impl Default for Config {
             capture_mic: true,
             vad_silence_ms: default_vad_silence(),
             live_max_chunk_secs: default_max_chunk(),
+            suppress_mic_echo: true,
         }
     }
 }

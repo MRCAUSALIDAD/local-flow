@@ -7,7 +7,9 @@ use std::time::{Duration, Instant};
 
 use crate::config::Config;
 use crate::loopback::{StreamCapture, Target};
-use crate::stream::{Track, TranscriptionWorker, Utterance, VadChunker, VadConfig};
+use crate::stream::{
+    ActivityLog, Track, TranscriptionWorker, Utterance, VadChunker, VadConfig,
+};
 use crate::whisper::{self, Options};
 use whisper_rs::WhisperContext;
 
@@ -17,6 +19,13 @@ const STATE_INTERVAL: Duration = Duration::from_millis(750);
 /// Backlog above which the UI is told transcription is lagging. Utterances are
 /// seconds of audio each, so even a couple waiting means falling behind.
 const LAG_THRESHOLD: usize = 3;
+
+/// Share of a microphone utterance that the system track must also have been
+/// speaking through before it is treated as bleed rather than the user.
+///
+/// Set high on purpose: dropping something the user actually said is worse
+/// than letting one echoed line through.
+const ECHO_COVERAGE: f32 = 0.85;
 
 #[derive(Clone, serde::Serialize)]
 pub struct LiveState {
@@ -102,6 +111,7 @@ impl LiveSession {
         let running = self.running.clone();
         let dropped = self.dropped.clone();
         let language = cfg.language.clone();
+        let suppress_echo = cfg.suppress_mic_echo && cfg.capture_mic;
         let session_start = Instant::now();
 
         thread::spawn(move || {
@@ -119,7 +129,11 @@ impl LiveSession {
 
             let worker = TranscriptionWorker::spawn(transcribe, session_start, on_segment);
 
-            let mut system_vad = VadChunker::new(Track::System, vad);
+            // The system track publishes when it was speaking so microphone
+            // utterances can be checked against it.
+            let system_activity = Arc::new(ActivityLog::new(Duration::from_secs(60)));
+            let mut system_vad =
+                VadChunker::new(Track::System, vad).reporting_to(system_activity.clone());
             let mut mic_vad = VadChunker::new(Track::Mic, vad);
             let mut last_state = Instant::now() - STATE_INTERVAL;
             let mut receiving = false;
@@ -142,6 +156,9 @@ impl LiveSession {
                     while let Ok(block) = rx.try_recv() {
                         idle = false;
                         for u in mic_vad.push(&block.samples, block.captured_at) {
+                            if suppress_echo && is_echo(&system_activity, &u) {
+                                continue;
+                            }
                             if !worker.submit(u) {
                                 dropped.fetch_add(1, Ordering::Relaxed);
                             }
@@ -169,6 +186,9 @@ impl LiveSession {
 
             // Emit whatever speech was still open when the user stopped.
             for u in [system_vad.flush(), mic_vad.flush()].into_iter().flatten() {
+                if suppress_echo && u.track == Track::Mic && is_echo(&system_activity, &u) {
+                    continue;
+                }
                 worker.submit(u);
             }
 
@@ -192,6 +212,21 @@ impl LiveSession {
         });
 
         Ok(())
+    }
+}
+
+/// Whether a microphone utterance is the speakers bleeding in rather than the
+/// user speaking.
+///
+/// Without headphones the microphone hears everything the speakers play, and
+/// Whisper turns that muffled copy into text that never gets said. The test is
+/// deliberately blunt: only when the system track was speaking through nearly
+/// all of the utterance.
+fn is_echo(system: &ActivityLog, utterance: &Utterance) -> bool {
+    match system.coverage(utterance.started_at, utterance.ended_at) {
+        Some(c) => c >= ECHO_COVERAGE,
+        // No system audio recorded over that span, so nothing to echo.
+        None => false,
     }
 }
 

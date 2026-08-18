@@ -152,12 +152,15 @@ From here it works **without internet**.
 
 ### macOS
 
-Two permissions, both in *System Settings → Privacy & Security*:
+Three permissions, all in *System Settings → Privacy & Security*:
 
 1. **Microphone** — requested on the first dictation. Allow it.
 2. **Accessibility** — required to type into **other** apps.
    - The app shows a banner with a button to open the pane, or go to
      *Privacy & Security → Accessibility* and **enable Local Flow**.
+3. **System audio capture** — needed for the *Listen* tab. It is a separate
+   permission category from the microphone. In testing on macOS 26 capture
+   worked without any prompt; if your system does ask, allow it.
 
 > **Important (unsigned builds):** every time you **rebuild** the app, macOS may
 > invalidate the Accessibility permission even if the checkbox stays checked.
@@ -195,7 +198,51 @@ Two permissions, both in *System Settings → Privacy & Security*:
 
 ---
 
-## 6. Uninstall
+## 6. Listening to your computer's audio
+
+Beyond dictation, Local Flow can transcribe **whatever your computer is
+playing**: a video call, a YouTube video, a podcast. Still fully local.
+
+1. Open the **Listen** tab.
+2. Leave **Audio source** on *Automatic* (or pick a specific output).
+3. Press **Start listening** and play whatever you want transcribed.
+
+Text appears live, labelled by speaker: **Them** (what the computer plays) and
+**Me** (your microphone, if you leave that track on in *Settings*). You can
+copy everything or export to `.md`; files go to the app data folder, under
+`sessions/`.
+
+While listening, ⌥ Space dictation is **disabled** on purpose: it would type
+the text into the call itself.
+
+### Things worth knowing
+
+- **Starting capture can take a few seconds.** macOS builds a temporary audio
+  device for the tap, and it is slower right after a previous session closed.
+  The button shows *Starting…* meanwhile.
+- **"Waiting for audio" is not an error.** The capture delivers nothing until
+  something plays.
+- **Headphones are recommended** if you enable the microphone track. On
+  speakers your mic also hears the playback and the text would be duplicated.
+  The app drops obvious echo automatically (*Suppress microphone echo*), but
+  headphones solve it outright.
+- **If the text comes out poor**, try the **Small** model in *Settings*.
+  Transcription runs far faster than real time, so there is plenty of headroom.
+
+### Per-system requirements
+
+| System | Requirement |
+| --- | --- |
+| **macOS** | 14.6 or newer. On older versions the tab is disabled and dictation keeps working as normal. |
+| **Windows** | None. |
+| **Linux** | PulseAudio or PipeWire (with `pipewire-pulse`). A bare ALSA system does not expose output audio. |
+
+> **Legal note:** recording or transcribing a conversation may require the
+> participants' consent depending on where you are. That is on you.
+
+---
+
+## 7. Uninstall
 
 - **macOS:** delete `/Applications/Local Flow.app` and
   `~/Library/Application Support/com.gabriel.local-flow` (models and config).
@@ -209,6 +256,11 @@ Two permissions, both in *System Settings → Privacy & Security*:
 ```
 UI (React)  ──invoke/events──►  Backend (Rust)
                                  ├── audio.rs    cpal capture + resample→16kHz
+                                 ├── loopback.rs system audio capture
+                                 ├── stream.rs   VAD chunking + live queue
+                                 ├── live.rs     two-track session
+                                 ├── session.rs  transcript and export
+                                 ├── dsp.rs      resampling and anti-aliasing
                                  ├── whisper.rs  whisper.cpp transcription (local AI)
                                  ├── models.rs   model download/management
                                  ├── config.rs   JSON settings

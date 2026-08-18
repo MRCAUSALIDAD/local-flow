@@ -43,6 +43,10 @@ export function LivePanel({
 }: Props) {
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState<string | null>(null);
+  // Opening a system audio tap can take many seconds when Core Audio is still
+  // tearing down a previous one, and the command does not return until it is
+  // ready. Without this the button would simply look dead.
+  const [starting, setStarting] = useState(false);
   const listRef = useRef<HTMLUListElement>(null);
   const listening = state?.listening ?? false;
 
@@ -63,10 +67,13 @@ export function LivePanel({
       if (listening) {
         await api.stopListening();
       } else {
+        setStarting(true);
         await api.startListening();
       }
     } catch (e) {
       setError(String(e));
+    } finally {
+      setStarting(false);
     }
   }
 
@@ -133,10 +140,20 @@ export function LivePanel({
         <button
           className={`live__toggle ${listening ? "live__toggle--on" : ""}`}
           onClick={toggle}
-          disabled={!hasModel}
+          disabled={!hasModel || starting}
         >
-          {listening ? "Stop listening" : "Start listening"}
+          {starting
+            ? "Starting…"
+            : listening
+              ? "Stop listening"
+              : "Start listening"}
         </button>
+
+        {starting && (
+          <p className="banner banner--info">
+            Opening the audio tap. This can take a few seconds.
+          </p>
+        )}
 
         {!hasModel && (
           <p className="banner banner--info">

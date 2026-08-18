@@ -232,7 +232,10 @@ impl StreamCapture {
             running.store(false, Ordering::SeqCst);
         });
 
-        match ready_rx.recv_timeout(Duration::from_secs(10)) {
+        // Generous: creating a Core Audio process tap and its aggregate device
+        // can take many seconds when coreaudiod is still tearing down a
+        // previous one. Ten seconds was tight enough to fail in practice.
+        match ready_rx.recv_timeout(Duration::from_secs(30)) {
             Ok(Ok(())) => Ok(rx),
             Ok(Err(e)) => {
                 self.running.store(false, Ordering::SeqCst);
@@ -240,7 +243,7 @@ impl StreamCapture {
             }
             Err(_) => {
                 self.running.store(false, Ordering::SeqCst);
-                Err("Timed out opening the audio device.".into())
+                Err("Timed out opening the audio device. Try again in a moment.".into())
             }
         }
     }

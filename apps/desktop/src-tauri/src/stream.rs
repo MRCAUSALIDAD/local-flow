@@ -10,6 +10,7 @@
 use serde::Serialize;
 use std::collections::VecDeque;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::Mutex;
 use std::sync::mpsc::{Receiver, SyncSender, TrySendError, sync_channel};
 use std::sync::Arc;
 use std::thread;
@@ -63,6 +64,15 @@ const FRAME: usize = 320;
 const ABS_FLOOR: f32 = 0.002;
 const OPEN_MULT: f32 = 4.0;
 const CLOSE_MULT: f32 = 2.0;
+/// Mean level a stretch of speech must reach before it is worth transcribing.
+///
+/// The open threshold adapts to the noise floor, so on a very quiet microphone
+/// it can trip on bleed from the speakers. Whisper does not return silence for
+/// such input: it invents fluent sentences that never happened, which is worse
+/// than missing a line. whisper.cpp's own no_speech threshold is not
+/// implemented, and whisper-rs exposes no per-segment probability, so an
+/// absolute gate is what is left.
+const MIN_SPEECH_RMS: f32 = 0.008;
 
 #[derive(Clone, Copy)]
 pub struct VadConfig {
@@ -92,6 +102,51 @@ fn samples_for(d: Duration) -> usize {
     (d.as_secs_f64() * TARGET_SR as f64) as usize
 }
 
+/// A rolling record of when one track carried speech.
+///
+/// Used to tell the user talking apart from the speakers bleeding into their
+/// microphone: if the system track was playing throughout what the microphone
+/// "heard", the microphone heard the speakers.
+pub struct ActivityLog {
+    /// (frame end, whether it carried speech), oldest first.
+    frames: Mutex<VecDeque<(Instant, bool)>>,
+    window: Duration,
+}
+
+impl ActivityLog {
+    pub fn new(window: Duration) -> Self {
+        Self {
+            frames: Mutex::new(VecDeque::new()),
+            window,
+        }
+    }
+
+    fn record(&self, at: Instant, voiced: bool) {
+        let mut f = self.frames.lock().unwrap();
+        f.push_back((at, voiced));
+        let cutoff = at.checked_sub(self.window).unwrap_or(at);
+        while f.front().is_some_and(|(t, _)| *t < cutoff) {
+            f.pop_front();
+        }
+    }
+
+    /// Fraction of the window that carried speech, or `None` if the window is
+    /// not covered by recorded frames at all.
+    pub fn coverage(&self, from: Instant, to: Instant) -> Option<f32> {
+        let f = self.frames.lock().unwrap();
+        let in_range: Vec<bool> = f
+            .iter()
+            .filter(|(t, _)| *t >= from && *t <= to)
+            .map(|(_, v)| *v)
+            .collect();
+        if in_range.is_empty() {
+            return None;
+        }
+        let voiced = in_range.iter().filter(|v| **v).count();
+        Some(voiced as f32 / in_range.len() as f32)
+    }
+}
+
 /// Splits a continuous 16 kHz mono stream into utterances.
 pub struct VadChunker {
     cfg: VadConfig,
@@ -108,11 +163,16 @@ pub struct VadChunker {
     /// The minimum-length test measures this, not the buffer: a click wrapped
     /// in pre-roll is still a click.
     voiced_samples: usize,
+    /// Running sum of frame levels over voiced frames, for the energy gate.
+    voiced_rms_sum: f32,
+    voiced_frames: usize,
     started_at: Option<Instant>,
     last_block_at: Option<Instant>,
     /// Leftover samples when a block does not divide into whole frames.
     partial: Vec<f32>,
     carry_continuation: bool,
+    /// Where this track publishes its speech activity, if anyone is watching.
+    activity: Option<Arc<ActivityLog>>,
 }
 
 impl VadChunker {
@@ -126,11 +186,20 @@ impl VadChunker {
             pre_roll: VecDeque::new(),
             trailing_silence: 0,
             voiced_samples: 0,
+            voiced_rms_sum: 0.0,
+            voiced_frames: 0,
             started_at: None,
             last_block_at: None,
             partial: Vec::new(),
             carry_continuation: false,
+            activity: None,
         }
+    }
+
+    /// Publishes this track's speech activity so another track can check it.
+    pub fn reporting_to(mut self, log: Arc<ActivityLog>) -> Self {
+        self.activity = Some(log);
+        self
     }
 
     /// Feeds one captured block, returning any utterances it completed.
@@ -184,6 +253,10 @@ impl VadChunker {
 
         let voiced = if self.in_speech { rms > close } else { rms > open };
 
+        if let Some(log) = &self.activity {
+            log.record(at, voiced);
+        }
+
         if !voiced {
             // Adapt only on quiet frames, so loud speech never raises the floor
             // to the point of masking itself.
@@ -205,6 +278,8 @@ impl VadChunker {
             self.current.extend_from_slice(frame);
             self.trailing_silence = 0;
             self.voiced_samples += frame.len();
+            self.voiced_rms_sum += rms;
+            self.voiced_frames += 1;
 
             if self.current.len() >= samples_for(self.cfg.max_len) {
                 // Cut mid-speech. The next utterance is marked as a
@@ -245,6 +320,13 @@ impl VadChunker {
         let continues_previous = self.carry_continuation;
         self.carry_continuation = truncated;
         let voiced = std::mem::take(&mut self.voiced_samples);
+        let rms_sum = std::mem::take(&mut self.voiced_rms_sum);
+        let frames = std::mem::take(&mut self.voiced_frames);
+        let mean_level = if frames > 0 {
+            rms_sum / frames as f32
+        } else {
+            0.0
+        };
 
         // Drop the trailing silence, keeping a little as a natural tail.
         let keep = samples_for(Duration::from_millis(120));
@@ -260,7 +342,7 @@ impl VadChunker {
             self.started_at = Some(at);
         }
 
-        if voiced < samples_for(self.cfg.min_len) {
+        if voiced < samples_for(self.cfg.min_len) || mean_level < MIN_SPEECH_RMS {
             return None;
         }
 
@@ -555,6 +637,19 @@ mod tests {
         assert!(out.is_empty(), "no pause yet, so nothing is complete");
         let tail = c.flush().expect("flush should emit the open utterance");
         assert!(tail.duration() >= Duration::from_millis(900));
+    }
+
+    #[test]
+    fn very_quiet_audio_is_not_transcribed() {
+        // Speaker bleed into the microphone trips the adaptive threshold but
+        // stays far below real speech. Whisper answers such input with
+        // invented sentences, so it never gets that far.
+        let mut c = VadChunker::new(Track::Mic, VadConfig::default());
+        let out = feed(
+            &mut c,
+            &[silence(16_000), tone(16_000, 0.004), silence(16_000)],
+        );
+        assert!(out.is_empty(), "bleed-level audio should not be transcribed");
     }
 
     #[test]
