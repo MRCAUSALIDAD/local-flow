@@ -50,8 +50,13 @@ jobs:
         if: runner.os == 'Linux'
         timeout-minutes: 10
         run: |
-          sudo sed -i 's|azure.archive.ubuntu.com|archive.ubuntu.com|g' /etc/apt/sources.list
-          sudo apt-get -o Acquire::Retries=3 update
+          # sources.list points at mirror+file:/etc/apt/apt-mirrors.txt, so the
+          # Azure mirrors live in that file and editing sources.list leaves them
+          # in place. Replace the list with the canonical archive instead.
+          echo 'http://archive.ubuntu.com/ubuntu/' | sudo tee /etc/apt/apt-mirrors.txt
+          sudo sed -i 's|azure.archive.ubuntu.com|archive.ubuntu.com|g' /etc/apt/sources.list || true
+          sudo apt-get -o Acquire::Retries=3 \
+            -o Acquire::http::Timeout=20 -o Acquire::https::Timeout=20 update
           sudo apt-get install -y \
             build-essential cmake curl wget file patchelf \
             libasound2-dev libxdo-dev libssl-dev \
