@@ -59,6 +59,13 @@ fn begin(app: &AppHandle) {
     if state.recorder.is_recording() {
         return;
     }
+    // Dictation types into whatever window has focus. During a live session
+    // that is most likely the call being transcribed, so refuse rather than
+    // spray text into it. The microphone is already captured as its own track.
+    if state.live.is_running() {
+        emit_error(app, "Stop listening before dictating.");
+        return;
+    }
     if state.transcriber.lock().unwrap().is_none() {
         emit_error(app, "No voice model yet. Download one in Settings.");
         return;

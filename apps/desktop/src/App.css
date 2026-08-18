@@ -718,3 +718,108 @@ kbd {
   border-top: 1px solid var(--line);
   z-index: 2;
 }
+
+/* ---- live listening ---- */
+
+.live__clock {
+  font-variant-numeric: tabular-nums;
+  font-size: 13px;
+  color: var(--cyan);
+  letter-spacing: 0.04em;
+}
+
+.live__toggle {
+  width: 100%;
+  margin-top: 14px;
+  padding: 13px 18px;
+  border: 1px solid rgba(38, 230, 255, 0.35);
+  border-radius: 12px;
+  background: linear-gradient(
+    135deg,
+    rgba(38, 230, 255, 0.16),
+    rgba(138, 91, 255, 0.16)
+  );
+  color: var(--text);
+  font-family: var(--font);
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  cursor: pointer;
+  transition: filter 0.16s ease, transform 0.08s ease;
+}
+
+.live__toggle:hover:not(:disabled) {
+  filter: brightness(1.18);
+}
+
+.live__toggle:active:not(:disabled) {
+  transform: translateY(1px);
+}
+
+.live__toggle:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.live__toggle--on {
+  border-color: rgba(255, 62, 165, 0.45);
+  background: linear-gradient(
+    135deg,
+    rgba(255, 62, 165, 0.2),
+    rgba(138, 91, 255, 0.2)
+  );
+}
+
+.live__actions {
+  display: flex;
+  gap: 8px;
+}
+
+.live__list {
+  max-height: 320px;
+  overflow-y: auto;
+}
+
+.live__item {
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  background: var(--glass);
+  /* A coloured edge carries the speaker, so the two tracks stay
+     distinguishable when skim-reading a long transcript. */
+  border-left-width: 3px;
+}
+
+.live__item + .live__item {
+  margin-top: 8px;
+}
+
+.live__item--system {
+  border-left-color: var(--cyan);
+}
+
+.live__item--mic {
+  border-left-color: var(--violet);
+}
+
+.live__meta {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+.live__who {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.live__who--system {
+  color: var(--cyan);
+}
+
+.live__who--mic {
+  color: var(--violet);
+}

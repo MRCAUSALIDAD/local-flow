@@ -4,16 +4,20 @@ import { TitleBar } from "./components/TitleBar";
 import { StatusOrb } from "./components/StatusOrb";
 import { TranscriptPanel } from "./components/TranscriptPanel";
 import { SettingsPanel } from "./components/SettingsPanel";
+import { LivePanel } from "./components/LivePanel";
 import * as api from "./lib/api";
 import type {
   Config,
   FlowStatus,
+  LiveEntry,
+  LiveState,
+  LoopbackSource,
   ModelInfo,
   TranscriptEntry,
 } from "./lib/types";
 import "./App.css";
 
-type Tab = "home" | "settings";
+type Tab = "home" | "listen" | "settings";
 
 const DEFAULT_CONFIG: Config = {
   model_path: null,
@@ -43,6 +47,10 @@ function App() {
   const [error, setError] = useState<string | null>(null);
   const [debug, setDebug] = useState<string | null>(null);
   const [accessOk, setAccessOk] = useState(true);
+  const [liveEntries, setLiveEntries] = useState<LiveEntry[]>([]);
+  const [liveState, setLiveState] = useState<LiveState | null>(null);
+  const [sources, setSources] = useState<LoopbackSource[]>([]);
+  const [systemAudioError, setSystemAudioError] = useState<string | null>(null);
   const idRef = useRef(0);
 
   async function refreshModels() {
@@ -57,6 +65,9 @@ function App() {
     api.listMicrophones().then(setMicrophones).catch(() => {});
     api.listModels().then(setModels).catch(() => {});
     api.accessibilityOk().then(setAccessOk).catch(() => {});
+    api.systemAudioStatus().then(setSystemAudioError).catch(() => {});
+    api.listLoopbackSources().then(setSources).catch(() => {});
+    api.liveEntries().then(setLiveEntries).catch(() => {});
 
     const poll = setInterval(() => {
       api.accessibilityOk().then(setAccessOk).catch(() => {});
@@ -85,6 +96,19 @@ function App() {
         setDownloading(null);
         refreshModels();
       }),
+      listen<LiveEntry>("flow-live-segment", (e) => {
+        // Segments can arrive out of order: both tracks share one
+        // transcription queue, so a short utterance can finish after a
+        // longer, earlier one. Insert by start time to match the backend.
+        setLiveEntries((prev) => {
+          const next = [...prev];
+          const at = next.findIndex((x) => x.start_ms > e.payload.start_ms);
+          if (at === -1) next.push(e.payload);
+          else next.splice(at, 0, e.payload);
+          return next;
+        });
+      }),
+      listen<LiveState>("flow-live-state", (e) => setLiveState(e.payload)),
     ]);
 
     return () => {
@@ -126,6 +150,12 @@ function App() {
           onClick={() => setTab("home")}
         >
           Dictate
+        </button>
+        <button
+          className={`tab ${tab === "listen" ? "tab--active" : ""}`}
+          onClick={() => setTab("listen")}
+        >
+          Listen
         </button>
         <button
           className={`tab ${tab === "settings" ? "tab--active" : ""}`}
@@ -182,6 +212,20 @@ function App() {
             )}
             <TranscriptPanel entries={entries} onClear={() => setEntries([])} />
           </>
+        ) : tab === "listen" ? (
+          <LivePanel
+            config={config}
+            onChange={persist}
+            entries={liveEntries}
+            state={liveState}
+            sources={sources}
+            unavailable={systemAudioError}
+            hasModel={hasModel}
+            onClear={() => {
+              api.clearSession().catch(() => {});
+              setLiveEntries([]);
+            }}
+          />
         ) : (
           <SettingsPanel
             config={config}

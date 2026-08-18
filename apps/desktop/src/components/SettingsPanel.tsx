@@ -132,6 +132,28 @@ export function SettingsPanel({
         />
 
         <Toggle
+          label="Capturar también tu micrófono al escuchar"
+          hint="Transcribe tu voz como interlocutor aparte en la pestaña Listen"
+          checked={config.capture_mic}
+          onChange={(v) => onChange({ ...config, capture_mic: v })}
+        />
+
+        <label className="field">
+          <span className="field__label">Pausa que separa intervenciones</span>
+          <select
+            className="select"
+            value={config.vad_silence_ms}
+            onChange={(e) =>
+              onChange({ ...config, vad_silence_ms: Number(e.target.value) })
+            }
+          >
+            <option value={400}>Corta (0,4 s) — más fragmentos</option>
+            <option value={600}>Normal (0,6 s)</option>
+            <option value={1000}>Larga (1 s) — frases más completas</option>
+          </select>
+        </label>
+
+        <Toggle
           label="Métricas fijas en pantalla"
           hint="Panel siempre visible con CPU, RAM y tiempos"
           checked={config.show_metrics}
