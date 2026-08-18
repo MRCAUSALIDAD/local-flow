@@ -7,6 +7,7 @@ import type {
   LiveEntry,
   LiveState,
   LoopbackSource,
+  Track,
 } from "../lib/types";
 
 interface Props {
@@ -14,6 +15,8 @@ interface Props {
   onChange: (next: Config) => void;
   entries: LiveEntry[];
   state: LiveState | null;
+  /** Provisional text per track, shown until the speaker pauses. */
+  partials: Partial<Record<Track, string>>;
   sources: LoopbackSource[];
   /** Reason system audio is unavailable here, if it is. */
   unavailable: string | null;
@@ -36,6 +39,7 @@ export function LivePanel({
   onChange,
   entries,
   state,
+  partials,
   sources,
   unavailable,
   hasModel,
@@ -49,6 +53,10 @@ export function LivePanel({
   const [starting, setStarting] = useState(false);
   const listRef = useRef<HTMLUListElement>(null);
   const listening = state?.listening ?? false;
+  // Interim lines, one per track that is mid-sentence.
+  const live = (["system", "mic"] as Track[])
+    .map((track) => ({ track, text: partials[track]?.trim() ?? "" }))
+    .filter((p) => p.text.length > 0);
 
   // Follow the transcript as it grows, but only while pinned to the bottom, so
   // scrolling back to read something is not yanked away.
@@ -58,7 +66,7 @@ export function LivePanel({
     const nearBottom =
       el.scrollHeight - el.scrollTop - el.clientHeight < 80;
     if (nearBottom) el.scrollTop = el.scrollHeight;
-  }, [entries]);
+  }, [entries, partials]);
 
   async function toggle() {
     setError(null);
@@ -202,7 +210,7 @@ export function LivePanel({
           )}
         </div>
 
-        {entries.length === 0 ? (
+        {entries.length === 0 && !live.length ? (
           <p className="transcript__empty">
             {listening
               ? "Listening… speech will appear here."
@@ -219,6 +227,20 @@ export function LivePanel({
                   <time className="transcript__time">{clock(e.start_ms)}</time>
                 </div>
                 <p className="transcript__text">{e.text}</p>
+              </li>
+            ))}
+            {live.map((p) => (
+              <li
+                key={`partial-${p.track}`}
+                className={`live__item live__item--${p.track} live__item--partial`}
+              >
+                <div className="live__meta">
+                  <span className={`live__who live__who--${p.track}`}>
+                    {p.track === "mic" ? "Me" : "Them"}
+                  </span>
+                  <span className="live__pending">speaking…</span>
+                </div>
+                <p className="transcript__text">{p.text}</p>
               </li>
             ))}
           </ul>

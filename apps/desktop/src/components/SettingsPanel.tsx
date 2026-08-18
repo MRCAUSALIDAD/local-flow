@@ -138,6 +138,20 @@ export function SettingsPanel({
           onChange={(v) => onChange({ ...config, capture_mic: v })}
         />
 
+        <Toggle
+          label="Descartar el eco del micrófono"
+          hint="Desactívalo si usas auriculares y hablas por encima del audio"
+          checked={config.suppress_mic_echo}
+          onChange={(v) => onChange({ ...config, suppress_mic_echo: v })}
+        />
+
+        <Toggle
+          label="Texto provisional mientras se habla"
+          hint="Muestra la transcripción en curso, que se reescribe hasta la pausa"
+          checked={config.live_partials}
+          onChange={(v) => onChange({ ...config, live_partials: v })}
+        />
+
         <label className="field">
           <span className="field__label">Pausa que separa intervenciones</span>
           <select

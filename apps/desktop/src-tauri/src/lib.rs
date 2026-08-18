@@ -335,6 +335,7 @@ fn start_listening(app: AppHandle, state: State<AppState>) -> Result<(), String>
     let segment_app = app.clone();
     let segment_session = state.session.clone();
     let state_app = app.clone();
+    let partial_app = app.clone();
 
     state.live.start(
         ctx,
@@ -345,6 +346,10 @@ fn start_listening(app: AppHandle, state: State<AppState>) -> Result<(), String>
         },
         move |live_state| {
             let _ = state_app.emit("flow-live-state", live_state);
+        },
+        move |track, text| {
+            // Empty text clears the interim line for that track.
+            let _ = partial_app.emit("flow-live-partial", (track, text));
         },
     )?;
 

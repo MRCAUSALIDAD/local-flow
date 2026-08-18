@@ -44,6 +44,8 @@ export interface Config {
   capture_mic: boolean;
   vad_silence_ms: number;
   live_max_chunk_secs: number;
+  suppress_mic_echo: boolean;
+  live_partials: boolean;
 }
 
 export interface ModelInfo {

@@ -12,6 +12,7 @@ import type {
   LiveEntry,
   LiveState,
   LoopbackSource,
+  Track,
   ModelInfo,
   TranscriptEntry,
 } from "./lib/types";
@@ -31,6 +32,8 @@ const DEFAULT_CONFIG: Config = {
   capture_mic: true,
   vad_silence_ms: 600,
   live_max_chunk_secs: 25,
+  suppress_mic_echo: true,
+  live_partials: true,
 };
 
 function App() {
@@ -51,6 +54,9 @@ function App() {
   const [liveState, setLiveState] = useState<LiveState | null>(null);
   const [sources, setSources] = useState<LoopbackSource[]>([]);
   const [systemAudioError, setSystemAudioError] = useState<string | null>(null);
+  // Provisional text per track while someone is still speaking. An empty
+  // string from the backend means the line is now stale.
+  const [partials, setPartials] = useState<Partial<Record<Track, string>>>({});
   const idRef = useRef(0);
 
   async function refreshModels() {
@@ -109,6 +115,10 @@ function App() {
         });
       }),
       listen<LiveState>("flow-live-state", (e) => setLiveState(e.payload)),
+      listen<[Track, string]>("flow-live-partial", (e) => {
+        const [track, text] = e.payload;
+        setPartials((prev) => ({ ...prev, [track]: text }));
+      }),
     ]);
 
     return () => {
@@ -218,6 +228,7 @@ function App() {
             onChange={persist}
             entries={liveEntries}
             state={liveState}
+            partials={partials}
             sources={sources}
             unavailable={systemAudioError}
             hasModel={hasModel}

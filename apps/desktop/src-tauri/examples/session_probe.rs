@@ -27,6 +27,7 @@ fn main() {
 
     let seg_session = session.clone();
     let started = Instant::now();
+    let started_partial = started;
 
     live.start(
         t.ctx.clone(),
@@ -48,6 +49,15 @@ fn main() {
             }
             if !st.listening {
                 println!("  (session ended, {:.1}s)", st.elapsed_ms as f64 / 1000.0);
+            }
+        },
+        move |_track, text| {
+            if !text.is_empty() {
+                println!(
+                    "  [{:6.1}s] ~~~~ | {}",
+                    started_partial.elapsed().as_secs_f64(),
+                    text
+                );
             }
         },
     )

@@ -8,9 +8,9 @@
 //! the pauses and transcribes each piece exactly once.
 
 use serde::Serialize;
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-use std::sync::Mutex;
+use std::sync::{Condvar, Mutex};
 use std::sync::mpsc::{Receiver, SyncSender, TrySendError, sync_channel};
 use std::sync::Arc;
 use std::thread;
@@ -19,7 +19,7 @@ use std::time::{Duration, Instant};
 use crate::dsp::TARGET_SR;
 
 /// Which stream an utterance came from.
-#[derive(Serialize, Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Serialize, Clone, Copy, PartialEq, Eq, Hash, Debug)]
 #[serde(rename_all = "lowercase")]
 pub enum Track {
     /// The computer's own output: the other people on the call, a video.
@@ -45,6 +45,16 @@ impl Utterance {
     }
 }
 
+/// Speech still in progress, transcribed provisionally.
+#[derive(Clone)]
+pub struct Pending {
+    pub samples: Vec<f32>,
+    pub track: Track,
+    pub voiced_samples: usize,
+    /// When this speech began, so callers can test it against another track.
+    pub started_at: Instant,
+}
+
 /// A transcribed piece of a live session.
 #[derive(Serialize, Clone, Debug)]
 pub struct LiveSegment {
@@ -59,6 +69,8 @@ pub struct LiveSegment {
 
 /// 20 ms at 16 kHz.
 const FRAME: usize = 320;
+/// Speech needed before an interim transcription is worth attempting.
+const PARTIAL_MIN_SPEECH: Duration = Duration::from_millis(1_000);
 /// Absolute level below which audio counts as silence regardless of the
 /// adapted noise floor, so a silent stream never drifts into self-triggering.
 const ABS_FLOOR: f32 = 0.002;
@@ -355,6 +367,40 @@ impl VadChunker {
         })
     }
 
+    /// Whether this track is mid-utterance right now.
+    pub fn is_speaking(&self) -> bool {
+        self.in_speech
+    }
+
+    /// A copy of the speech currently being collected, if it is worth
+    /// transcribing provisionally.
+    ///
+    /// Final segments only appear once the speaker pauses, which on a long
+    /// sentence is many seconds of nothing on screen. This feeds the interim
+    /// text shown in the meantime.
+    pub fn pending(&self) -> Option<Pending> {
+        if !self.in_speech || self.voiced_samples < samples_for(PARTIAL_MIN_SPEECH) {
+            return None;
+        }
+        // The same energy gate a finished utterance faces. Without it, room
+        // noise loud enough to open the adaptive threshold gets sent to
+        // Whisper, which answers with invented sentences.
+        let mean_level = if self.voiced_frames > 0 {
+            self.voiced_rms_sum / self.voiced_frames as f32
+        } else {
+            0.0
+        };
+        if mean_level < MIN_SPEECH_RMS {
+            return None;
+        }
+        Some(Pending {
+            samples: self.current.clone(),
+            track: self.track,
+            voiced_samples: self.voiced_samples,
+            started_at: self.started_at?,
+        })
+    }
+
     /// Emits whatever is still buffered. Call when capture stops.
     pub fn flush(&mut self) -> Option<Utterance> {
         if !self.in_speech {
@@ -431,6 +477,10 @@ impl TranscriptionWorker {
                     Ok(text) if text.trim().is_empty() => {}
                     Ok(text) if is_non_speech(&text) => {}
                     Ok(text) => {
+                        let text = strip_annotations(&text);
+                        if text.is_empty() {
+                            continue;
+                        }
                         carry = Some(tail_words(&text, 32));
                         emit(LiveSegment {
                             track: utterance.track,
@@ -468,6 +518,85 @@ impl TranscriptionWorker {
 
     pub fn stop(&self) {
         self.running.store(false, Ordering::SeqCst);
+    }
+}
+
+/// Transcribes interim text for speech that has not finished yet.
+///
+/// Kept apart from the main worker so provisional work can never delay a final
+/// segment. It holds at most one job per track and always discards the older
+/// one: interim text that has been superseded is worthless.
+pub struct PartialWorker {
+    slot: Arc<(Mutex<Vec<Pending>>, Condvar)>,
+    busy: Arc<AtomicBool>,
+    running: Arc<AtomicBool>,
+}
+
+impl PartialWorker {
+    pub fn spawn<F>(
+        transcribe: Box<dyn Fn(&Pending) -> Result<String, String> + Send>,
+        emit: F,
+    ) -> Self
+    where
+        F: Fn(Track, String) + Send + 'static,
+    {
+        let slot = Arc::new((Mutex::new(Vec::<Pending>::new()), Condvar::new()));
+        let busy = Arc::new(AtomicBool::new(false));
+        let running = Arc::new(AtomicBool::new(true));
+
+        let worker_slot = slot.clone();
+        let worker_busy = busy.clone();
+        let worker_running = running.clone();
+        thread::spawn(move || {
+            let (lock, cv) = &*worker_slot;
+            let mut last: HashMap<Track, String> = HashMap::new();
+            loop {
+                let job = {
+                    let mut queue = lock.lock().unwrap();
+                    while queue.is_empty() && worker_running.load(Ordering::SeqCst) {
+                        queue = cv.wait(queue).unwrap();
+                    }
+                    if !worker_running.load(Ordering::SeqCst) {
+                        return;
+                    }
+                    queue.remove(0)
+                };
+
+                worker_busy.store(true, Ordering::SeqCst);
+                if let Ok(text) = transcribe(&job) {
+                    let text = strip_annotations(&text);
+                    // Re-emitting identical text only churns the UI, and it is
+                    // common: a speaker pausing mid-sentence yields the same
+                    // transcription pass after pass.
+                    let unchanged = last.get(&job.track).is_some_and(|p| *p == text);
+                    if !text.is_empty() && !is_non_speech(&text) && !unchanged {
+                        last.insert(job.track, text.clone());
+                        emit(job.track, text);
+                    }
+                }
+                worker_busy.store(false, Ordering::SeqCst);
+            }
+        });
+
+        Self { slot, busy, running }
+    }
+
+    /// Queues interim work, replacing anything still waiting for that track.
+    pub fn offer(&self, pending: Pending) {
+        let (lock, cv) = &*self.slot;
+        let mut queue = lock.lock().unwrap();
+        queue.retain(|p| p.track != pending.track);
+        queue.push(pending);
+        cv.notify_one();
+    }
+
+    pub fn is_busy(&self) -> bool {
+        self.busy.load(Ordering::SeqCst)
+    }
+
+    pub fn stop(&self) {
+        self.running.store(false, Ordering::SeqCst);
+        self.slot.1.notify_all();
     }
 }
 
@@ -512,6 +641,38 @@ fn is_non_speech(text: &str) -> bool {
         "www.amara.org",
     ];
     ARTEFACTS.iter().any(|a| lower == *a)
+}
+
+/// Removes sound annotations Whisper attaches to the ends of real speech,
+/// such as a leading "(Música)".
+///
+/// Only the ends are touched. Brackets in the middle of a sentence are far
+/// more likely to be something the speaker actually said.
+fn strip_annotations(text: &str) -> String {
+    let mut t = text.trim();
+    loop {
+        let trimmed = match t.chars().next() {
+            Some('[') => t.find(']').map(|i| t[i + 1..].trim_start()),
+            Some('(') => t.find(')').map(|i| t[i + 1..].trim_start()),
+            _ => None,
+        };
+        match trimmed {
+            Some(rest) if rest != t => t = rest,
+            _ => break,
+        }
+    }
+    loop {
+        let trimmed = match t.chars().last() {
+            Some(']') => t.rfind('[').map(|i| t[..i].trim_end()),
+            Some(')') => t.rfind('(').map(|i| t[..i].trim_end()),
+            _ => None,
+        };
+        match trimmed {
+            Some(rest) if rest != t => t = rest,
+            _ => break,
+        }
+    }
+    t.to_string()
 }
 
 /// Last `n` words, used to prime a continuation without feeding Whisper a
@@ -680,6 +841,18 @@ mod tests {
         assert!(!is_non_speech("Thanks for watching the demo, it worked."));
         assert!(!is_non_speech("(laughs) but seriously, the deadline is Friday"));
         assert!(!is_non_speech("El segundo fragmento."));
+    }
+
+    #[test]
+    fn annotations_are_stripped_from_the_ends_only() {
+        assert_eq!(strip_annotations("(Música) Esta es una frase."), "Esta es una frase.");
+        assert_eq!(strip_annotations("Esta es una frase. [Música]"), "Esta es una frase.");
+        assert_eq!(strip_annotations("[Música] Hola [Música]"), "Hola");
+        // Mid-sentence brackets are likely real speech, so they survive.
+        assert_eq!(
+            strip_annotations("dijo (y esto es clave) que no"),
+            "dijo (y esto es clave) que no"
+        );
     }
 
     #[test]

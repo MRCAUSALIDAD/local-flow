@@ -36,6 +36,13 @@ pub struct Config {
     /// then nothing bleeds and the check can only cost real speech.
     #[serde(default = "default_true")]
     pub suppress_mic_echo: bool,
+    /// Show provisional text while someone is still speaking.
+    ///
+    /// Final segments only land on a pause, so without this a long sentence
+    /// leaves the screen empty until it ends. Interim text rewrites itself as
+    /// more audio arrives, which some people find distracting.
+    #[serde(default = "default_true")]
+    pub live_partials: bool,
 }
 
 fn default_vad_silence() -> u64 {
@@ -69,6 +76,7 @@ impl Default for Config {
             vad_silence_ms: default_vad_silence(),
             live_max_chunk_secs: default_max_chunk(),
             suppress_mic_echo: true,
+            live_partials: true,
         }
     }
 }

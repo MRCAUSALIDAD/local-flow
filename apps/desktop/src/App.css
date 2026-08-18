@@ -823,3 +823,15 @@ kbd {
 .live__who--mic {
   color: var(--violet);
 }
+
+.live__item--partial {
+  /* Provisional: still being rewritten as the speaker continues. */
+  opacity: 0.62;
+  border-style: dashed;
+}
+
+.live__pending {
+  font-size: 11px;
+  color: var(--text-dim);
+  font-style: italic;
+}
