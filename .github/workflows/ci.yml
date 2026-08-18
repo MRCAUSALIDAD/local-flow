@@ -13,6 +13,7 @@ on:
 jobs:
   frontend:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -35,16 +36,22 @@ jobs:
       matrix:
         platform: [macos-14, ubuntu-22.04, windows-latest]
     runs-on: ${{ matrix.platform }}
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
 
       # Tauri/WebKit plus this app's native dependencies. libasound2-dev is the
       # microphone (cpal), libxdo-dev is keystroke injection (enigo), and
       # cmake builds whisper.cpp from source.
+      # GitHub's Azure apt mirrors intermittently stop responding and apt
+      # retries them until the job times out. Point at the canonical archive
+      # and cap the retries so a bad mirror fails fast instead of hanging.
       - name: Install Linux dependencies
         if: runner.os == 'Linux'
+        timeout-minutes: 10
         run: |
-          sudo apt-get update
+          sudo sed -i 's|azure.archive.ubuntu.com|archive.ubuntu.com|g' /etc/apt/sources.list
+          sudo apt-get -o Acquire::Retries=3 update
           sudo apt-get install -y \
             build-essential cmake curl wget file patchelf \
             libasound2-dev libxdo-dev libssl-dev \
