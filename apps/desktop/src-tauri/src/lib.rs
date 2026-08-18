@@ -2,8 +2,9 @@ mod audio;
 mod config;
 pub mod dsp;
 pub mod loopback;
+pub mod stream;
 mod models;
-mod whisper;
+pub mod whisper;
 
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
