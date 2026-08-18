@@ -22,12 +22,13 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          # One universal binary rather than a job per architecture. Intel
+          # macOS runners are scarce enough that the macos-13 job sat queued
+          # for a whole release without ever starting, so v0.1.0 shipped
+          # without an Intel build at all.
           - platform: macos-14
-            rust_target: aarch64-apple-darwin
-            args: "--target aarch64-apple-darwin"
-          - platform: macos-13
-            rust_target: x86_64-apple-darwin
-            args: "--target x86_64-apple-darwin"
+            rust_target: aarch64-apple-darwin,x86_64-apple-darwin
+            args: "--target universal-apple-darwin"
           - platform: ubuntu-22.04
             rust_target: x86_64-unknown-linux-gnu
             args: "--bundles deb,appimage"
@@ -98,7 +99,7 @@ jobs:
           releaseBody: |
             ## Install
 
-            **macOS** — download the `.dmg` for your chip (`aarch64` = Apple Silicon, `x64` = Intel), open it, drag **Local Flow** to Applications.
+            **macOS** — download the `.dmg`, open it, drag **Local Flow** to Applications. It runs on both Apple Silicon and Intel.
             First launch: right click the app → **Open**. If macOS says the app is damaged, run:
             `xattr -dr com.apple.quarantine "/Applications/Local Flow.app"`
 
