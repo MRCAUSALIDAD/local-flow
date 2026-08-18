@@ -1,7 +1,12 @@
 mod audio;
-mod config;
+pub mod config;
+pub mod dsp;
+pub mod loopback;
+pub mod live;
+pub mod session;
+pub mod stream;
 mod models;
-mod whisper;
+pub mod whisper;
 
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
@@ -16,6 +21,8 @@ use tauri_plugin_global_shortcut::{
 
 use audio::Recorder;
 use config::Config;
+use live::LiveSession;
+use session::Session;
 use whisper::Transcriber;
 
 #[derive(Clone)]
@@ -25,6 +32,8 @@ pub struct AppState {
     config: Arc<Mutex<Config>>,
     config_dir: Arc<PathBuf>,
     data_dir: Arc<PathBuf>,
+    live: Arc<LiveSession>,
+    session: Arc<Session>,
 }
 
 fn emit_status(app: &AppHandle, status: &str) {
@@ -48,6 +57,13 @@ fn emit_error(app: &AppHandle, message: &str) {
 fn begin(app: &AppHandle) {
     let state = app.state::<AppState>();
     if state.recorder.is_recording() {
+        return;
+    }
+    // Dictation types into whatever window has focus. During a live session
+    // that is most likely the call being transcribed, so refuse rather than
+    // spray text into it. The microphone is already captured as its own track.
+    if state.live.is_running() {
+        emit_error(app, "Stop listening before dictating.");
         return;
     }
     if state.transcriber.lock().unwrap().is_none() {
@@ -290,6 +306,93 @@ fn stop_dictation(app: AppHandle) {
     finish(&app);
 }
 
+// --- live listening (system audio) --------------------------------------------
+
+/// `None` when system audio capture is usable, otherwise the reason it is not.
+#[tauri::command]
+fn system_audio_status() -> Option<String> {
+    loopback::availability().err()
+}
+
+#[tauri::command]
+fn list_loopback_sources() -> Vec<loopback::LoopbackSource> {
+    loopback::list_sources()
+}
+
+#[tauri::command]
+fn start_listening(app: AppHandle, state: State<AppState>) -> Result<(), String> {
+    if state.live.is_running() {
+        return Err("Already listening.".into());
+    }
+    let ctx = match state.transcriber.lock().unwrap().as_ref() {
+        Some(t) => t.ctx.clone(),
+        None => return Err("No voice model yet. Download one in Settings.".into()),
+    };
+    let cfg = state.config.lock().unwrap().clone();
+
+    state.session.begin();
+
+    let segment_app = app.clone();
+    let segment_session = state.session.clone();
+    let state_app = app.clone();
+    let partial_app = app.clone();
+
+    state.live.start(
+        ctx,
+        &cfg,
+        move |segment| {
+            let entry = segment_session.push(segment);
+            let _ = segment_app.emit("flow-live-segment", entry);
+        },
+        move |live_state| {
+            let _ = state_app.emit("flow-live-state", live_state);
+        },
+        move |track, text| {
+            // Empty text clears the interim line for that track.
+            let _ = partial_app.emit("flow-live-partial", (track, text));
+        },
+    )?;
+
+    emit_status(&app, "listening-system");
+    Ok(())
+}
+
+#[tauri::command]
+fn stop_listening(app: AppHandle, state: State<AppState>) {
+    state.live.stop();
+    emit_status(&app, "idle");
+}
+
+#[tauri::command]
+fn live_entries(state: State<AppState>) -> Vec<session::Entry> {
+    state.session.entries()
+}
+
+#[tauri::command]
+fn clear_session(state: State<AppState>) {
+    state.session.clear();
+}
+
+#[tauri::command]
+fn session_text(state: State<AppState>) -> String {
+    state.session.to_text()
+}
+
+/// Writes the transcript into the app data directory, returning its path.
+#[tauri::command]
+fn export_session(state: State<AppState>, format: String) -> Result<String, String> {
+    if state.session.is_empty() {
+        return Err("Nothing to export yet.".into());
+    }
+    let format = session::Format::parse(&format)
+        .ok_or_else(|| format!("Unknown export format: {format}"))?;
+    state
+        .session
+        .write(&state.data_dir, format)
+        .map(|p| p.to_string_lossy().to_string())
+        .map_err(|e| format!("Could not write the transcript: {e}"))
+}
+
 const OVERLAY_MARGIN: f64 = 130.0;
 
 fn position_overlay(window: &tauri::WebviewWindow, w: f64, h: f64) {
@@ -425,6 +528,8 @@ pub fn run() {
 
             app.manage(AppState {
                 recorder: Recorder::new(),
+                live: Arc::new(LiveSession::new()),
+                session: Arc::new(Session::new()),
                 transcriber: Arc::new(Mutex::new(transcriber)),
                 config: Arc::new(Mutex::new(cfg)),
                 config_dir: Arc::new(config_dir),
@@ -481,6 +586,14 @@ pub fn run() {
             open_accessibility_settings,
             start_dictation,
             stop_dictation,
+            system_audio_status,
+            list_loopback_sources,
+            start_listening,
+            stop_listening,
+            live_entries,
+            clear_session,
+            session_text,
+            export_session,
             overlay_expand,
             overlay_collapse,
         ])

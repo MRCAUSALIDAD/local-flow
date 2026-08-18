@@ -4,5 +4,9 @@
 <dict>
     <key>NSMicrophoneUsageDescription</key>
     <string>Local Flow needs the microphone to transcribe your voice locally.</string>
+    <!-- Capturing system output audio goes through Core Audio process taps,
+         which sit in their own TCC category, separate from the microphone. -->
+    <key>NSAudioCaptureUsageDescription</key>
+    <string>Local Flow needs to capture your computer's audio to transcribe calls and videos locally.</string>
 </dict>
 </plist>

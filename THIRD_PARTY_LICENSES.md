@@ -27,12 +27,16 @@ To regenerate a complete, transitive report:
 | serde_json | 1 | Apache-2.0 OR MIT |
 | anyhow | 1 | Apache-2.0 OR MIT |
 | dirs | 5 | Apache-2.0 OR MIT |
-| cpal | 0.15 | Apache-2.0 |
+| cpal | 0.18 | Apache-2.0 |
 | whisper-rs | 0.14 | MIT |
 | enigo | 0.3 | MIT |
 | sysinfo | 0.32 | MIT |
 | reqwest | 0.12 | Apache-2.0 OR MIT |
 | macos-accessibility-client | 0.0.1 | Apache-2.0 OR MIT |
+
+On Linux, cpal is built with its `pulseaudio` backend, which pulls in the
+pure-Rust `pulseaudio` crate (MIT OR Apache-2.0). It speaks the PulseAudio
+protocol directly, so no system PulseAudio library is linked or required.
 
 ## Node packages (`apps/desktop/package.json`)
 

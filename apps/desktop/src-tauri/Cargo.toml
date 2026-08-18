@@ -1,7 +1,7 @@
 [package]
 name = "local-flow"
-version = "0.1.0"
-description = "Local Flow — offline voice dictation"
+version = "0.2.0"
+description = "Local Flow — offline voice dictation and system audio transcription"
 authors = ["Gabriel"]
 edition = "2021"
 
@@ -27,7 +27,7 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 anyhow = "1"
 dirs = "5"
-cpal = "0.15"
+cpal = "0.18"
 whisper-rs = "0.14"
 enigo = "0.3"
 sysinfo = "0.32"
@@ -35,3 +35,9 @@ reqwest = { version = "0.12", default-features = false, features = ["blocking", 
 
 [target.'cfg(target_os = "macos")'.dependencies]
 macos-accessibility-client = "0.0.1"
+
+# The default Linux host is ALSA, which does not expose PulseAudio/PipeWire
+# monitor sources — the only way to capture system output audio on Linux.
+# The `pulseaudio` backend is pure Rust, so this adds no system dependency.
+[target.'cfg(target_os = "linux")'.dependencies]
+cpal = { version = "0.18", features = ["pulseaudio"] }

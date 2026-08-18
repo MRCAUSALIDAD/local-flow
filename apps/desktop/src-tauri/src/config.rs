@@ -16,6 +16,41 @@ pub struct Config {
     pub show_metrics: bool,
     #[serde(default = "default_corner")]
     pub metrics_corner: String,
+
+    // --- live listening (system audio) ---
+    /// Device to tap for system audio. `None` picks the default output.
+    #[serde(default)]
+    pub loopback_source: Option<String>,
+    /// Also transcribe the microphone as a separate speaker.
+    #[serde(default = "default_true")]
+    pub capture_mic: bool,
+    /// Silence that ends an utterance.
+    #[serde(default = "default_vad_silence")]
+    pub vad_silence_ms: u64,
+    /// Hard cap on an utterance, keeping it inside Whisper's 30 s window.
+    #[serde(default = "default_max_chunk")]
+    pub live_max_chunk_secs: u64,
+    /// Discard microphone speech that is really the speakers bleeding in.
+    ///
+    /// Off is right when wearing headphones and talking over the audio, since
+    /// then nothing bleeds and the check can only cost real speech.
+    #[serde(default = "default_true")]
+    pub suppress_mic_echo: bool,
+    /// Show provisional text while someone is still speaking.
+    ///
+    /// Final segments only land on a pause, so without this a long sentence
+    /// leaves the screen empty until it ends. Interim text rewrites itself as
+    /// more audio arrives, which some people find distracting.
+    #[serde(default = "default_true")]
+    pub live_partials: bool,
+}
+
+fn default_vad_silence() -> u64 {
+    600
+}
+
+fn default_max_chunk() -> u64 {
+    25
 }
 
 fn default_true() -> bool {
@@ -36,6 +71,12 @@ impl Default for Config {
             copy_to_clipboard: true,
             show_metrics: false,
             metrics_corner: default_corner(),
+            loopback_source: None,
+            capture_mic: true,
+            vad_silence_ms: default_vad_silence(),
+            live_max_chunk_secs: default_max_chunk(),
+            suppress_mic_echo: true,
+            live_partials: true,
         }
     }
 }
